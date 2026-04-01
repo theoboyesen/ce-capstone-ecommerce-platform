@@ -3,12 +3,12 @@ resource "aws_security_group" "app_sg" {
   description = "Allow traffic from load balancer"
   vpc_id      = var.vpc_id
 
- ingress {
-  from_port       = 3000
-  to_port         = 3000
-  protocol        = "tcp"
-  security_groups = [aws_security_group.alb_sg.id]
-}
+  ingress {
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
 
   egress {
     from_port   = 0
@@ -20,82 +20,60 @@ resource "aws_security_group" "app_sg" {
 
 resource "aws_launch_template" "app" {
   name_prefix   = "app-template"
-  image_id      = "ami-0c76bd4bd302b30ec" # Amazon Linux 2 (eu-west-2)
+  image_id      = "ami-0c76bd4bd302b30ec"
   instance_type = "t3.micro"
 
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
-user_data = base64encode(<<-EOF
+  # TAGS FOR INSTANCES
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name        = "capstone-instance"
+      Project     = "capstone"
+      Environment = "dev"
+    }
+  }
+
+  user_data = base64encode(<<-EOF
 #!/bin/bash
 
-# Update system
 yum update -y
-
-# Install Node.js
 curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
 yum install -y nodejs
 
-# Create app file
 cat <<EOT > /home/ec2-user/server.js
 const http = require("http");
 
-const METADATA_BASE = "http://169.254.169.254/latest/meta-data/";
-
-async function getMetadata(path) {
-  return new Promise((resolve, reject) => {
-    http.get(METADATA_BASE + path, (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => resolve(data));
-    }).on("error", reject);
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
   if (req.url.startsWith("/health")) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ status: "ok" }));
+    res.writeHead(200);
+    return res.end("OK");
   }
 
   if (req.url === "/" || req.url.startsWith("/?")) {
-    try {
-      const instanceId = await getMetadata("instance-id");
-      const az = await getMetadata("placement/availability-zone");
-
-      const response = {
-        instance_id: instanceId,
-        availability_zone: az,
-        status: "healthy"
-      };
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(response, null, 2));
-    } catch (err) {
-      res.writeHead(500);
-      res.end("Error fetching metadata");
-    }
-  } else {
-    res.writeHead(404);
-    res.end("Not Found");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      instance_id: "metadata-unavailable",
+      availability_zone: "metadata-unavailable",
+      status: "healthy"
+    }, null, 2));
   }
+
+  res.writeHead(404);
+  res.end("Not Found");
 });
 
-server.listen(3000, () => {
-  console.log("Server running on port 3000");
-});
+server.listen(3000);
 EOT
 
-# Ensure correct ownership
 chown ec2-user:ec2-user /home/ec2-user/server.js
-
-# Wait a moment for Node install
 sleep 5
 
-# Run app as ec2-user with logging
 sudo -u ec2-user node /home/ec2-user/server.js > /home/ec2-user/app.log 2>&1 &
-
 EOF
-)
+  )
 }
 
 resource "aws_autoscaling_group" "app_asg" {
@@ -104,7 +82,7 @@ resource "aws_autoscaling_group" "app_asg" {
   min_size         = 3
 
   vpc_zone_identifier = var.private_subnet_ids
-  target_group_arns = [aws_lb_target_group.app_tg.arn]
+  target_group_arns   = [aws_lb_target_group.app_tg.arn]
 
   launch_template {
     id      = aws_launch_template.app.id
@@ -114,6 +92,18 @@ resource "aws_autoscaling_group" "app_asg" {
   tag {
     key                 = "Name"
     value               = "capstone-instance"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = "capstone"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = "dev"
     propagate_at_launch = true
   }
 }
@@ -151,13 +141,17 @@ resource "aws_lb" "app_alb" {
     Owner       = "theo"
   }
 }
-}
 
 resource "aws_lb_target_group" "app_tg" {
   name     = "app-target-group"
   port     = 3000
   protocol = "HTTP"
   vpc_id   = var.vpc_id
+
+  tags = {
+    Project     = "capstone"
+    Environment = "dev"
+  }
 
   health_check {
     path                = "/health"
@@ -198,8 +192,8 @@ resource "aws_cloudwatch_metric_alarm" "high_cpu" {
     AutoScalingGroupName = aws_autoscaling_group.app_asg.name
   }
 
-  alarm_description = "This alarm triggers when CPU exceeds 70%"
-} 
+  alarm_description = "CPU exceeds 70%"
+}
 
 resource "aws_cloudwatch_metric_alarm" "unhealthy_hosts" {
   alarm_name          = "unhealthy-hosts"
@@ -216,7 +210,7 @@ resource "aws_cloudwatch_metric_alarm" "unhealthy_hosts" {
     LoadBalancer = aws_lb.app_alb.arn_suffix
   }
 
-  alarm_description = "Triggers when any instance becomes unhealthy"
+  alarm_description = "Instance unhealthy"
 }
 
 resource "aws_cloudwatch_metric_alarm" "high_latency" {
@@ -233,23 +227,24 @@ resource "aws_cloudwatch_metric_alarm" "high_latency" {
     LoadBalancer = aws_lb.app_alb.arn_suffix
   }
 
-  alarm_description = "Triggers when response time is too high"
+  alarm_description = "High latency"
 }
+
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "capstone-dashboard"
 
   dashboard_body = jsonencode({
     widgets = [
       {
-        type = "metric"
-        x    = 0
-        y    = 0
+        type   = "metric"
+        x      = 0
+        y      = 0
         width  = 12
         height = 6
 
         properties = {
           metrics = [
-            [ "AWS/EC2", "CPUUtilization", "AutoScalingGroupName", aws_autoscaling_group.app_asg.name ]
+            ["AWS/EC2", "CPUUtilization", "AutoScalingGroupName", aws_autoscaling_group.app_asg.name]
           ]
           period = 60
           stat   = "Average"
