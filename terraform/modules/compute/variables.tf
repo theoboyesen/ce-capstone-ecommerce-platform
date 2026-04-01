@@ -12,3 +12,8 @@ variable "public_subnet_ids" {
   description = "Public subnet IDs"
   type        = list(string)
 }
+variable "db_password" {
+  description = "Database password"
+  type        = string
+  sensitive   = true
+}
