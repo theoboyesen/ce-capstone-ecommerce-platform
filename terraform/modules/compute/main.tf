@@ -1,3 +1,14 @@
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+
+  owners = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
+
 resource "aws_security_group" "app_sg" {
   name        = "app-security-group"
   description = "Allow traffic from load balancer"
@@ -20,12 +31,15 @@ resource "aws_security_group" "app_sg" {
 
 resource "aws_launch_template" "app" {
   name_prefix   = "app-template"
-  image_id      = "ami-0c76bd4bd302b30ec"
+  image_id = data.aws_ami.amazon_linux.id
   instance_type = "t3.micro"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ec2_profile.name
+  }
 
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
-  # TAGS FOR INSTANCES
   tag_specifications {
     resource_type = "instance"
 
@@ -41,8 +55,9 @@ resource "aws_launch_template" "app" {
 
 yum update -y
 curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-yum install -y nodejs
+yum install -y nodejs amazon-cloudwatch-agent
 
+# Create app
 cat <<EOT > /home/ec2-user/server.js
 const http = require("http");
 
@@ -71,7 +86,36 @@ EOT
 chown ec2-user:ec2-user /home/ec2-user/server.js
 sleep 5
 
+# Start app
 sudo -u ec2-user node /home/ec2-user/server.js > /home/ec2-user/app.log 2>&1 &
+
+# Create CloudWatch config
+cat <<CWCONFIG > /opt/aws/amazon-cloudwatch-agent/bin/config.json
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/home/ec2-user/app.log",
+            "log_group_name": "capstone-app-logs",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    }
+  }
+}
+CWCONFIG
+
+# Start CloudWatch agent
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \\
+-a fetch-config \\
+-m ec2 \\
+-c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json \\
+-s
+
 EOF
   )
 }
@@ -254,4 +298,4 @@ resource "aws_cloudwatch_dashboard" "main" {
       }
     ]
   })
-}
+} 
