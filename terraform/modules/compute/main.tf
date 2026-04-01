@@ -144,6 +144,13 @@ resource "aws_lb" "app_alb" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = var.public_subnet_ids
+
+  tags = {
+    Project     = "capstone"
+    Environment = "dev"
+    Owner       = "theo"
+  }
+}
 }
 
 resource "aws_lb_target_group" "app_tg" {
@@ -194,6 +201,40 @@ resource "aws_cloudwatch_metric_alarm" "high_cpu" {
   alarm_description = "This alarm triggers when CPU exceeds 70%"
 } 
 
+resource "aws_cloudwatch_metric_alarm" "unhealthy_hosts" {
+  alarm_name          = "unhealthy-hosts"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 0
+
+  dimensions = {
+    TargetGroup  = aws_lb_target_group.app_tg.arn_suffix
+    LoadBalancer = aws_lb.app_alb.arn_suffix
+  }
+
+  alarm_description = "Triggers when any instance becomes unhealthy"
+}
+
+resource "aws_cloudwatch_metric_alarm" "high_latency" {
+  alarm_name          = "high-response-time"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 1
+
+  dimensions = {
+    LoadBalancer = aws_lb.app_alb.arn_suffix
+  }
+
+  alarm_description = "Triggers when response time is too high"
+}
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "capstone-dashboard"
 
