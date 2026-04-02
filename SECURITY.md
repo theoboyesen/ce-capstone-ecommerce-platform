@@ -38,6 +38,14 @@ No sensitive data or credentials are stored in the application. IAM roles are us
 
 ---
 
+### Database Security
+
+- RDS deployed in private subnets
+- Access restricted via security groups
+- Not publicly accessible
+
+---
+
 ## Monitoring
 
 CloudWatch is used to monitor:

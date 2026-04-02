@@ -66,6 +66,15 @@ Enables outbound internet access for EC2 instances in private subnets (e.g., for
 
 ---
 
+### RDS (Database Layer)
+
+- Managed relational database (RDS)
+- Deployed in private subnets
+- Not publicly accessible
+- Used as the data persistence layer
+
+---
+
 ## Scalability
 
 * Auto Scaling Group maintains desired capacity
