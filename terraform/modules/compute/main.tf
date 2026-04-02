@@ -1,14 +1,25 @@
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+
+  owners = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]
+  }
+}
+
 resource "aws_security_group" "app_sg" {
   name        = "app-security-group"
   description = "Allow traffic from load balancer"
   vpc_id      = var.vpc_id
 
- ingress {
-  from_port       = 80
-  to_port         = 80
-  protocol        = "tcp"
-  security_groups = [aws_security_group.alb_sg.id]
-}
+  ingress {
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
 
   egress {
     from_port   = 0
@@ -20,20 +31,123 @@ resource "aws_security_group" "app_sg" {
 
 resource "aws_launch_template" "app" {
   name_prefix   = "app-template"
-  image_id      = "ami-0c76bd4bd302b30ec" # Amazon Linux 2 (eu-west-2)
+  image_id      = data.aws_ami.amazon_linux.id
   instance_type = "t3.micro"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ec2_profile.name
+  }
 
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name        = "capstone-instance"
+      Project     = "capstone"
+      Environment = "dev"
+    }
+  }
+
   user_data = base64encode(<<-EOF
-              #!/bin/bash
-              yum update -y
-              yum install -y httpd
-              systemctl start httpd
-              systemctl enable httpd
-              echo "Hello from $(hostname)" > /var/www/html/index.html
-              EOF
-  )
+#!/bin/bash
+
+yum update -y
+
+# Install Node 16 
+curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
+yum install -y nodejs
+
+# Create app
+cat <<EOT > /home/ec2-user/server.js
+const http = require("http");
+
+const getMetadata = (path) => {
+  return new Promise((resolve) => {
+    http.get("http://169.254.169.254/latest/meta-data/" + path, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => resolve(data));
+    }).on("error", () => resolve("unavailable"));
+  });
+};
+
+const server = http.createServer(async (req, res) => {
+  if (req.url.startsWith("/health")) {
+    res.writeHead(200);
+    return res.end("OK");
+  }
+
+  if (req.url === "/" || req.url.startsWith("/?")) {
+    const instanceId = await getMetadata("instance-id");
+    const az = await getMetadata("placement/availability-zone");
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      instance_id: instanceId,
+      availability_zone: az,
+      status: "healthy"
+    }, null, 2));
+  }
+
+  res.writeHead(404);
+  res.end("Not Found");
+});
+
+server.listen(3000, "0.0.0.0");
+EOT
+
+chown ec2-user:ec2-user /home/ec2-user/server.js
+
+# Wait for node to be available
+until which node; do
+  echo "Waiting for Node.js..."
+  sleep 2
+done
+
+# Extra buffer (yum installs can lag)
+sleep 5
+
+# Start app
+sudo -u ec2-user nohup node /home/ec2-user/server.js > /home/ec2-user/app.log 2>&1 &
+
+# Confirm it's running
+sleep 2
+ps aux | grep node
+
+# Install CloudWatch agent
+yum install -y amazon-cloudwatch-agent
+
+# Create config
+cat <<CWCONFIG > /opt/aws/amazon-cloudwatch-agent/bin/config.json
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/home/ec2-user/app.log",
+            "log_group_name": "capstone-app-logs",
+            "log_stream_name": "{instance_id}",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    }
+  }
+}
+CWCONFIG
+
+# Start agent
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+-a fetch-config \
+-m ec2 \
+-c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json \
+-s
+
+EOF
+)
 }
 
 resource "aws_autoscaling_group" "app_asg" {
@@ -42,7 +156,7 @@ resource "aws_autoscaling_group" "app_asg" {
   min_size         = 3
 
   vpc_zone_identifier = var.private_subnet_ids
-  target_group_arns = [aws_lb_target_group.app_tg.arn]
+  target_group_arns   = [aws_lb_target_group.app_tg.arn]
 
   launch_template {
     id      = aws_launch_template.app.id
@@ -52,6 +166,18 @@ resource "aws_autoscaling_group" "app_asg" {
   tag {
     key                 = "Name"
     value               = "capstone-instance"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = "capstone"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = "dev"
     propagate_at_launch = true
   }
 }
@@ -82,17 +208,36 @@ resource "aws_lb" "app_alb" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = var.public_subnet_ids
+
+  tags = {
+    Project     = "capstone"
+    Environment = "dev"
+    Owner       = "theo"
+  }
 }
 
 resource "aws_lb_target_group" "app_tg" {
   name     = "app-target-group"
-  port     = 80
+  port     = 3000
   protocol = "HTTP"
   vpc_id   = var.vpc_id
 
+  tags = {
+    Project     = "capstone"
+    Environment = "dev"
+  }
+
   health_check {
-    path = "/"
-    port = "traffic-port"
+    path                = "/health"
+    port                = "traffic-port"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 5
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -107,8 +252,180 @@ resource "aws_lb_listener" "http" {
   }
 }
 
+resource "aws_cloudwatch_dashboard" "golden_signals" {
+  dashboard_name = "capstone-golden-signals"
+
+  dashboard_body = jsonencode({
+    widgets = [
+
+      # ------------------------
+      # TITLE
+      # ------------------------
+      {
+        "type": "text",
+        "x": 0,
+        "y": 0,
+        "width": 24,
+        "height": 2,
+        "properties": {
+          "markdown": "# Capstone Golden Signals Dashboard\n### Traffic • Latency • Errors • Saturation • Availability"
+        }
+      },
+
+      # ------------------------
+      # TRAFFIC
+      # ------------------------
+      {
+        "type": "metric",
+        "x": 0,
+        "y": 2,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "title": "Traffic (Request Count)",
+          "view": "timeSeries",
+          "stacked": false,
+          "metrics": [
+            [
+              "AWS/ApplicationELB",
+              "RequestCount",
+              "LoadBalancer",
+              aws_lb.app_alb.arn_suffix
+            ]
+          ],
+          "region": var.aws_region,
+          "stat": "Sum",
+          "period": 60,
+          "legend": {
+            "position": "bottom"
+          }
+        }
+      },
+
+      # ------------------------
+      # LATENCY
+      # ------------------------
+      {
+        "type": "metric",
+        "x": 12,
+        "y": 2,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "title": "Latency (Target Response Time)",
+          "view": "timeSeries",
+          "metrics": [
+            [
+              "AWS/ApplicationELB",
+              "TargetResponseTime",
+              "LoadBalancer",
+              aws_lb.app_alb.arn_suffix
+            ]
+          ],
+          "region": var.aws_region,
+          "stat": "Average",
+          "period": 60,
+          "legend": {
+            "position": "bottom"
+          }
+        }
+      },
+
+      # ------------------------
+      # ERRORS
+      # ------------------------
+      {
+        "type": "metric",
+        "x": 0,
+        "y": 8,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "title": "Errors (5XX Responses)",
+          "view": "timeSeries",
+          "metrics": [
+            [
+              "AWS/ApplicationELB",
+              "HTTPCode_Target_5XX_Count",
+              "LoadBalancer",
+              aws_lb.app_alb.arn_suffix
+            ]
+          ],
+          "region": var.aws_region,
+          "stat": "Sum",
+          "period": 60,
+          "legend": {
+            "position": "bottom"
+          }
+        }
+      },
+
+      # ------------------------
+      # SATURATION
+      # ------------------------
+      {
+        "type": "metric",
+        "x": 12,
+        "y": 8,
+        "width": 12,
+        "height": 6,
+        "properties": {
+          "title": "Saturation (EC2 CPU Utilization)",
+          "view": "timeSeries",
+          "metrics": [
+            [
+              "AWS/EC2",
+              "CPUUtilization",
+              "AutoScalingGroupName",
+              aws_autoscaling_group.app_asg.name
+            ]
+          ],
+          "region": var.aws_region,
+          "stat": "Average",
+          "period": 60,
+          "legend": {
+            "position": "bottom"
+          }
+        }
+      },
+
+      # ------------------------
+      # AVAILABILITY
+      # ------------------------
+      {
+        "type": "metric",
+        "x": 0,
+        "y": 14,
+        "width": 24,
+        "height": 6,
+        "properties": {
+          "title": "Availability (Healthy Host Count)",
+          "view": "timeSeries",
+          "metrics": [
+            [
+              "AWS/ApplicationELB",
+              "HealthyHostCount",
+              "TargetGroup",
+              aws_lb_target_group.app_tg.arn_suffix,
+              "LoadBalancer",
+              aws_lb.app_alb.arn_suffix
+            ]
+          ],
+          "region": var.aws_region,
+          "stat": "Average",
+          "period": 60,
+          "legend": {
+            "position": "bottom"
+          }
+        }
+      }
+
+    ]
+  })
+}
+
 resource "aws_cloudwatch_metric_alarm" "high_cpu" {
-  alarm_name          = "high-cpu-utilisation"
+  alarm_name          = "capstone-high-cpu"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
@@ -121,31 +438,57 @@ resource "aws_cloudwatch_metric_alarm" "high_cpu" {
     AutoScalingGroupName = aws_autoscaling_group.app_asg.name
   }
 
-  alarm_description = "This alarm triggers when CPU exceeds 70%"
-} 
+  alarm_description = "CPU usage too high"
+}
 
-resource "aws_cloudwatch_dashboard" "main" {
-  dashboard_name = "capstone-dashboard"
+resource "aws_cloudwatch_metric_alarm" "high_latency" {
+  alarm_name          = "capstone-high-latency"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 1
 
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type = "metric"
-        x    = 0
-        y    = 0
-        width  = 12
-        height = 6
+  dimensions = {
+    LoadBalancer = aws_lb.app_alb.arn_suffix
+  }
 
-        properties = {
-          metrics = [
-            [ "AWS/EC2", "CPUUtilization", "AutoScalingGroupName", aws_autoscaling_group.app_asg.name ]
-          ]
-          period = 60
-          stat   = "Average"
-          region = "eu-west-2"
-          title  = "EC2 CPU Utilisation"
-        }
-      }
-    ]
-  })
+  alarm_description = "Latency too high"
+}
+
+resource "aws_cloudwatch_metric_alarm" "high_5xx_errors" {
+  alarm_name          = "capstone-5xx-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 5
+
+  dimensions = {
+    LoadBalancer = aws_lb.app_alb.arn_suffix
+  }
+
+  alarm_description = "Too many 5XX errors"
+}
+
+resource "aws_cloudwatch_metric_alarm" "low_healthy_hosts" {
+  alarm_name          = "capstone-low-healthy-hosts"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "HealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 2
+
+  dimensions = {
+    TargetGroup  = aws_lb_target_group.app_tg.arn_suffix
+    LoadBalancer = aws_lb.app_alb.arn_suffix
+  }
+
+  alarm_description = "Not enough healthy instances"
 }
