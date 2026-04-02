@@ -11,7 +11,7 @@ module "compute" {
   public_subnet_ids  = module.networking.public_subnet_ids
   db_password        = var.db_password
 
-  aws_region         = var.aws_region
+  aws_region = var.aws_region
 }
 
 provider "aws" {
