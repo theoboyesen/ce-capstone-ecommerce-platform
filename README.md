@@ -1,105 +1,178 @@
-# E-Commerce Cloud Platform (Capstone Project)
+# AWS Cloud Infrastructure Capstone Project
 
 ## Overview
-This project is a production-ready cloud platform built using Terraform on AWS. It demonstrates a scalable, secure, and automated multi-tier architecture designed to simulate real-world cloud engineering practices.
 
-The platform allows users to access an application via a load balancer, while the backend infrastructure is designed to be highly available, fault-tolerant, and cost-efficient.
+This project demonstrates the design and deployment of a production-style cloud infrastructure on AWS using Terraform. The system is designed with high availability, scalability, and observability in mind.
+
+It consists of a load-balanced application running on EC2 instances within private subnets, managed by an Auto Scaling Group and monitored using CloudWatch.
 
 ---
 
 ## Architecture
 
-The platform follows a multi-tier architecture:
+The application follows a multi-tier architecture:
 
-- **Public Tier**
-  - Application Load Balancer (ALB)
-  - Handles incoming internet traffic
+User → Application Load Balancer → Auto Scaling Group → EC2 Instances (Node.js)
 
-- **Private Tier**
-  - EC2 instances managed by an Auto Scaling Group
-  - Application runs securely without direct internet exposure
+### Key Components
 
-- **Networking**
-  - VPC with public and private subnets across multiple Availability Zones
-  - NAT Gateway enables outbound internet access for private resources
+* **VPC** with public and private subnets across multiple Availability Zones
+* **Application Load Balancer (ALB)** to distribute incoming traffic
+* **Auto Scaling Group (ASG)** maintaining three EC2 instances
+* **EC2 instances** running a Node.js application
+* **NAT Gateway** to allow outbound internet access from private subnets
 
 ---
 
-## Infrastructure as Code
+## Application
 
-- Built using **Terraform**
-- Modular structure for reusability and clarity:
-  - `networking` module (VPC, subnets, routing)
-  - `compute` module (EC2, ALB, Auto Scaling)
-- Remote state stored in **S3** for consistency and team collaboration
+A lightweight Node.js application is deployed on each EC2 instance.
 
----
+### Endpoints
 
-## CI/CD Pipeline
+* `/`
+  Returns instance metadata:
 
-Implemented using **GitHub Actions**:
+```json
+{
+  "instance_id": "...",
+  "availability_zone": "...",
+  "status": "healthy"
+}
+```
 
-- Pull Requests trigger:
-  - `terraform plan` (safe preview of changes)
-
-- Merges to `main` trigger:
-  - `terraform apply` (deploy infrastructure)
-
-This ensures safe, controlled, and auditable infrastructure changes.
+* `/health`
+  Returns a 200 OK response and is used by the load balancer for health checks.
 
 ---
 
-## Security
+## Features
 
-Security was implemented using a **defence-in-depth approach**:
-
-- EC2 instances deployed in **private subnets**
-- No direct internet access to application instances
-- Security groups enforce **least privilege access**:
-  - ALB allows inbound traffic from the internet
-  - EC2 instances only accept traffic from the ALB
+* Infrastructure as Code using Terraform
+* Multi-AZ deployment for high availability
+* Load balancing with health checks
+* Auto Scaling Group for instance management
+* Secure architecture with no direct public access to EC2
+* CloudWatch monitoring and alerting
+* Centralised logging using CloudWatch Logs
 
 ---
 
 ## Monitoring and Observability
 
-- **CloudWatch Dashboard** for visibility into infrastructure metrics
-- **CloudWatch Alarm** configured to trigger when CPU utilisation exceeds threshold
+CloudWatch is used to provide visibility into system performance and health.
 
-This enables proactive monitoring and system health awareness.
+### Dashboard Metrics
+
+* EC2 CPU utilisation
+* ALB request count
+* Healthy host count
+
+### Alerts
+
+* High CPU utilisation
+* Unhealthy host count
+* High response time
+
+### Logging
+
+Application logs are collected from EC2 instances and sent to CloudWatch Logs for centralised monitoring.
 
 ---
 
 ## Cost Optimisation
 
-- Used **t3.micro instances** (AWS Free Tier eligible)
-- Minimal infrastructure footprint while maintaining scalability
-- Auto Scaling ensures efficient resource usage based on demand
+### Estimated Monthly Cost
+
+* EC2 (3 × t3.micro): approximately $25–30
+* Application Load Balancer: approximately $18–20
+* NAT Gateway: approximately $30–35
+
+Estimated total: $70–90 per month (region and usage dependent)
+
+### Strategies
+
+* Use of t3.micro instances to minimise compute costs
+* Infrastructure is destroyed when not in use to avoid unnecessary charges
+* Private subnets used to reduce exposure and unnecessary data transfer
+* Fixed Auto Scaling capacity to maintain predictable costs
+
+### Trade-offs
+
+* Smaller instance types reduce cost but limit performance under high load
+* NAT Gateway provides secure outbound access but is a significant cost component
+* Fixed scaling improves cost predictability but reduces flexibility compared to dynamic scaling
 
 ---
 
-## Key Design Decisions
+## Challenges and Solutions
 
-- **Multi-tier architecture** to separate concerns and improve scalability
-- **Auto Scaling Group** to handle varying traffic loads
-- **Security group referencing** to enforce strict access control between tiers
-- **CI/CD pipeline** to automate and standardise deployments
-- **Remote state management** to prevent configuration drift and enable collaboration
+### Node.js Compatibility
+
+Node.js 18 failed to install on Amazon Linux 2 due to a glibc version mismatch.
+
+**Solution:**
+Switched to Node.js 16, which is compatible with the base AMI.
 
 ---
 
-## How to Deploy
+### Application Startup Issues
+
+The application initially failed to start due to timing issues in the EC2 bootstrap process.
+
+**Solution:**
+Reordered the user data script to ensure the application starts before additional services such as the CloudWatch agent.
+
+---
+
+### Debugging Infrastructure vs Application
+
+It was initially unclear whether issues were caused by infrastructure or application configuration.
+
+**Solution:**
+Used EC2 system logs and ALB health checks to isolate the issue to the application layer.
+
+---
+
+## Deployment
+
+### Prerequisites
+
+* AWS account
+* Terraform installed
+* AWS CLI configured
+
+### Steps
 
 ```bash
 terraform init
-terraform plan
 terraform apply
 ```
 
-## Future Improvements
+---
 
-- Add database tier (RDS) for full 3-tier architecture
-- Implement HTTPS with ACM and TLS termination
-- Containerisation using Docker and ECS/EKS
-- Add WAF for enhanced security
+## Screenshots
 
+Include the following screenshots in a `screenshots/` directory:
+
+* Application response via ALB
+* Load balancing across instances
+* Target group health status
+* CloudWatch dashboard
+* CloudWatch alarms
+
+---
+
+## Key Learnings
+
+* Designing scalable infrastructure using Terraform
+* Implementing load balancing and health checks
+* Managing remote state and infrastructure lifecycle
+* Debugging real-world deployment issues
+* Implementing monitoring and alerting in AWS
+
+---
+
+## Project Status
+
+Infrastructure deployed, application running, and monitoring configured.
