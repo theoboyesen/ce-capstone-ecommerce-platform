@@ -151,6 +151,18 @@ terraform apply
 
 ---
 
+## Testing
+
+The application can be tested via the load balancer endpoint:
+
+- `/` returns instance metadata
+- `/health` returns a 200 OK response
+
+Refreshing the root endpoint demonstrates load balancing across instances.
+
+
+---
+
 ## Screenshots
 
 Include the following screenshots in a `screenshots/` directory:
@@ -176,3 +188,8 @@ Include the following screenshots in a `screenshots/` directory:
 ## Project Status
 
 Infrastructure deployed, application running, and monitoring configured.
+
+## Author
+
+Theo Boyesen  
+Capstone project for Ironhack Cloud Engineering bootcamp

@@ -2,11 +2,11 @@
 
 ## Overview
 
-This document outlines how to operate and troubleshoot the system.
+This runbook provides guidance on deploying, operating, and troubleshooting the system.
 
 ---
 
-## Common Operations
+## Deployment
 
 ### Deploy Infrastructure
 
@@ -25,15 +25,20 @@ terraform destroy
 
 ---
 
-## Health Checks
+## Application Health
 
 Check application:
 
-```
 http://<alb-dns>/health
-```
 
 Expected response: OK
+
+---
+
+## Monitoring
+
+* CloudWatch dashboard provides system metrics
+* Alarms notify on high CPU, unhealthy instances, and latency
 
 ---
 
@@ -44,7 +49,7 @@ Expected response: OK
 Possible causes:
 
 * Application not running
-* Node.js failed to install
+* Node.js installation failure
 
 Actions:
 
@@ -57,37 +62,43 @@ Actions:
 
 Possible causes:
 
-* Health check path incorrect
-* App not responding on port 3000
+* Health check endpoint not responding
+* Incorrect port configuration
 
 Actions:
 
-* Confirm `/health` endpoint
-* Check application logs
+* Verify `/health` endpoint
+* Ensure app listens on port 3000
 
 ---
 
-### High CPU Alert
+### High CPU Usage
 
 Actions:
 
 * Review CloudWatch metrics
-* Consider scaling or instance type adjustment
+* Consider scaling or instance type changes
 
 ---
 
-## Logs
+## Incident Response
 
-Application logs are available in CloudWatch under:
-
-capstone-app-logs
+1. Identify issue via CloudWatch alarms
+2. Check target group health
+3. Review logs
+4. Replace instances if necessary
 
 ---
 
-## Recovery
+## Backup and Recovery
 
-If system becomes unstable:
+* Infrastructure is defined in Terraform and can be recreated
+* No persistent data storage is used
 
-```bash
-terraform apply -replace=module.compute.aws_autoscaling_group.app_asg
-```
+---
+
+## Scaling
+
+To adjust capacity, update Terraform configuration:
+
+terraform apply

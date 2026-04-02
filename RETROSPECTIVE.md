@@ -9,8 +9,8 @@ This project involved designing and deploying a production-style AWS infrastruct
 ## What Went Well
 
 * Successfully implemented a multi-tier architecture
-* Built a working load-balanced and auto-scaled application
-* Implemented monitoring and alerting with CloudWatch
+* Deployed a working load-balanced application
+* Configured monitoring and alerting
 
 ---
 
@@ -18,48 +18,64 @@ This project involved designing and deploying a production-style AWS infrastruct
 
 ### Node.js Compatibility Issue
 
-Node.js 18 failed to install due to incompatibility with Amazon Linux 2.
+Node.js 18 failed due to system library incompatibility.
 
 Resolution:
-Switched to Node.js 16 which resolved the issue.
+Switched to Node.js 16.
 
 ---
 
-### Application Startup Failures
+### Application Startup Issues
 
-The application failed to start due to user_data execution timing.
+Application failed to start due to script execution order.
 
 Resolution:
-Reordered the script to ensure the application starts before additional services.
+Ensured application starts before additional services.
 
 ---
 
 ### Debugging Complexity
 
-Distinguishing between infrastructure and application issues was initially difficult.
+Difficulty distinguishing infrastructure vs application issues.
 
 Resolution:
-Used system logs and health checks to isolate the issue.
+Used logs and health checks to isolate root causes.
 
 ---
 
-## Key Learnings
+## Technical Skills Learned
 
-* Importance of debugging using logs rather than guessing
-* Understanding dependency compatibility in cloud environments
-* Separation of infrastructure and application concerns
-* Real-world complexity of deployment pipelines
+* Terraform infrastructure design
+* AWS networking and load balancing
+* Debugging deployment issues
+* Monitoring and alerting setup
 
 ---
 
-## What I Would Improve
+## Key Takeaways
 
-* Use containerisation for more consistent deployments
-* Implement dynamic auto scaling policies
-* Improve CI/CD pipeline with automated testing
+* Logs should guide debugging
+* Infrastructure and application issues must be separated
+* Small misconfigurations can have large impacts
+
+---
+
+## What Would Be Improved
+
+* Implement dynamic auto scaling
+* Use containerisation (Docker)
+* Add automated testing
+
+---
+
+## Future Improvements
+
+* CI/CD pipeline enhancements
+* More advanced monitoring
+* Improved security controls
 
 ---
 
 ## Conclusion
 
-This project provided hands-on experience with real-world cloud infrastructure challenges and significantly improved debugging and problem-solving skills.
+This project provided practical experience with real-world cloud infrastructure challenges and improved problem-solving skills.
